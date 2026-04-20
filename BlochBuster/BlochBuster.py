@@ -1426,9 +1426,8 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
     '''
     try:
         from manim import (
-            ThreeDScene, Arrow3D, Sphere, ThreeDAxes, ValueTracker,
-            DEGREES, linear, Text, tempconfig,
-            BLUE_E, GREY, RIGHT, UP, OUT, UL, DL,
+            ThreeDScene, Line3D, Dot3D, Sphere, ThreeDAxes, Text,
+            tempconfig, DEGREES, BLUE_E, GREY, RIGHT, UP, OUT, UL, DL,
         )
     except ImportError as e:
         raise ImportError(
@@ -1441,7 +1440,6 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
     nx, ny, nz, nComps, nIsoc = vectors.shape[:5]
     nFrames = vectors.shape[6]
     effective_frames = list(range(0, nFrames, leapFactor))
-    nEffective = len(effective_frames)
 
     def b2m(v):
         # Map Bloch (Mx, My, Mz) → Manim (Mx, Mz, My) so that the
@@ -1504,74 +1502,80 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
             title.to_corner(UL)
             self.add_fixed_in_frame_mobjects(title)
 
-            t_tracker = ValueTracker(0)
-
             time_mob = Text('time = 0.0 msec', font_size=18).to_corner(DL)
             self.add_fixed_in_frame_mobjects(time_mob)
 
-            def update_time(mob):
-                idx = int(np.clip(t_tracker.get_value(), 0, nEffective - 1))
-                frame = effective_frames[idx]
+            # Build index list and create one Line3D + tip Dot3D per vector (once).
+            # Using Line3D + put_start_and_end_on is ~19× faster than
+            # recreating Arrow3D objects via become() on every frame.
+            indices = [
+                (xi, yi, zi, c, m)
+                for xi in range(nx)
+                for yi in range(ny)
+                for zi in range(nz)
+                for c in range(nComps)
+                for m in range(nIsoc)
+            ]
+
+            frame0 = effective_frames[0]
+            lines, tips, alphas = [], [], []
+            for (xi, yi, zi, c, m) in indices:
+                col = comp_colors_hex[c % len(comp_colors_hex)]
+                alpha = 1.0 - 2 * abs((m + 0.5) / nIsoc - 0.5)
+                alphas.append(alpha)
+
+                M0 = vectors[xi, yi, zi, c, m, :3, frame0]
+                p0 = (np.zeros(3) if bloch_config['collapseLocations']
+                      else vectors[xi, yi, zi, c, m, 3:, frame0] / bloch_config['locSpacing'])
+                s0 = b2m(p0)
+                mv0 = b2m(M0)
+                if np.linalg.norm(mv0) < 1e-6:
+                    mv0 = np.array([0.0, 1e-6, 0.0])
+
+                line = Line3D(start=s0, end=s0 + mv0, color=col)
+                line.set_opacity(alpha)
+                tip = Dot3D(point=s0 + mv0, radius=0.04, color=col)
+                tip.set_opacity(alpha)
+                lines.append(line)
+                tips.append(tip)
+
+            self.add(*lines, *tips)
+
+            # Render frame by frame: update geometry then hold for 1/fps seconds.
+            # This matches Manim's frame_rate to the animation fps so each wait()
+            # produces exactly one output video frame.
+            for frame in effective_frames:
                 t_val = bloch_config['tFrames'][frame % len(bloch_config['tFrames'])]
-                mob.become(Text(f'time = {t_val:.1f} msec', font_size=18).to_corner(DL))
-            time_mob.add_updater(update_time)
+                time_mob.become(
+                    Text(f'time = {t_val:.1f} msec', font_size=18).to_corner(DL)
+                )
 
-            for xi in range(nx):
-                for yi in range(ny):
-                    for zi in range(nz):
-                        for c in range(nComps):
-                            for m in range(nIsoc):
-                                col = comp_colors_hex[c % len(comp_colors_hex)]
-                                alpha = 1.0 - 2 * abs((m + 0.5) / nIsoc - 0.5)
+                for j, (xi, yi, zi, c, m) in enumerate(indices):
+                    M = vectors[xi, yi, zi, c, m, :3, frame]
+                    p = (np.zeros(3) if bloch_config['collapseLocations']
+                         else vectors[xi, yi, zi, c, m, 3:, frame] / bloch_config['locSpacing'])
+                    s = b2m(p)
+                    mv = b2m(M)
+                    mag = np.linalg.norm(mv)
+                    if mag < 1e-6:
+                        lines[j].set_opacity(0)
+                        tips[j].set_opacity(0)
+                    else:
+                        lines[j].set_opacity(alphas[j])
+                        tips[j].set_opacity(alphas[j])
+                        lines[j].put_start_and_end_on(s, s + mv)
+                        tips[j].move_to(s + mv)
 
-                                M0 = vectors[xi, yi, zi, c, m, :3, 0]
-                                if not bloch_config['collapseLocations']:
-                                    p0 = vectors[xi, yi, zi, c, m, 3:, 0] / bloch_config['locSpacing']
-                                else:
-                                    p0 = np.zeros(3)
-
-                                s0 = b2m(p0)
-                                mv0 = b2m(M0)
-                                if np.linalg.norm(mv0) < 1e-6:
-                                    mv0 = np.array([0.0, 1e-6, 0.0])
-
-                                arrow = Arrow3D(start=s0, end=s0 + mv0, color=col)
-                                arrow.set_opacity(alpha)
-
-                                def make_updater(ix, iy, iz, ic, im, col_h, alph):
-                                    def updater(mob):
-                                        idx = int(np.clip(t_tracker.get_value(), 0, nEffective - 1))
-                                        frame = effective_frames[idx]
-                                        M = vectors[ix, iy, iz, ic, im, :3, frame]
-                                        if not bloch_config['collapseLocations']:
-                                            p = vectors[ix, iy, iz, ic, im, 3:, frame] / bloch_config['locSpacing']
-                                        else:
-                                            p = np.zeros(3)
-                                        s = b2m(p)
-                                        mv = b2m(M)
-                                        if np.linalg.norm(mv) < 1e-6:
-                                            mv = np.array([0.0, 1e-6, 0.0])
-                                        new_a = Arrow3D(start=s, end=s + mv, color=col_h)
-                                        new_a.set_opacity(alph)
-                                        mob.become(new_a)
-                                    return updater
-
-                                arrow.add_updater(make_updater(xi, yi, zi, c, m, col, alpha))
-                                self.add(arrow)
-
-            total_time = nEffective / bloch_config['fps']
-            self.play(
-                t_tracker.animate.set_value(nEffective - 1),
-                run_time=total_time,
-                rate_func=linear,
-            )
+                self.wait(1 / bloch_config['fps'])
 
     file_ext = outFile.suffix.lower()
     fmt = 'gif' if file_ext == '.gif' else 'mp4'
 
     with tempfile.TemporaryDirectory() as tmpdir:
         with tempconfig({
-            'quality': 'medium_quality',
+            'pixel_height': 720,
+            'pixel_width': 1280,
+            'frame_rate': bloch_config['fps'],
             'media_dir': tmpdir,
             'output_file': 'bloch_output',
             'format': fmt,
