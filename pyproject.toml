@@ -12,13 +12,14 @@ dependencies = [
     "pyyaml>=6.0.2",
     "ffmpeg-python>=0.2.0",
     "static-ffmpeg>=2.13",
+    "manim>=0.20.1",
 ]
-
-[project.optional-dependencies]
-manim = ["manim>=0.18.0"]
 
 [project.urls]
 Repository = "https://github.com/bretglun/BlochBuster"
+
+[tool.hatch.build.targets.wheel]
+packages = ["BlochBuster"]
 
 [build-system]
 requires = ["hatchling"]

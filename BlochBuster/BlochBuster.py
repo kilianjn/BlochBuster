@@ -1427,7 +1427,7 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
     try:
         from manim import (
             ThreeDScene, Arrow3D, Sphere, ThreeDAxes, ValueTracker,
-            DEGREES, linear, Text, MathTex, tempconfig,
+            DEGREES, linear, Text, tempconfig,
             BLUE_E, GREY, RIGHT, UP, OUT, UL, DL,
         )
     except ImportError as e:
@@ -1492,9 +1492,9 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
 
                 # Axis labels: Manim x→Bloch x, Manim y→Bloch z, Manim z→Bloch y
                 rotate = 'rotate' in output
-                x_lbl = MathTex("x" if rotate else r"x^\prime").scale(0.6)
-                y_lbl = MathTex("z").scale(0.6)
-                z_lbl = MathTex("y" if rotate else r"y^\prime").scale(0.6)
+                x_lbl = Text("x" if rotate else "x'", font_size=20)
+                y_lbl = Text("z", font_size=20)
+                z_lbl = Text("y" if rotate else "y'", font_size=20)
                 x_lbl.next_to(axes.x_axis.get_end(), RIGHT, buff=0.15)
                 y_lbl.next_to(axes.y_axis.get_end(), UP, buff=0.15)
                 z_lbl.next_to(axes.z_axis.get_end(), OUT, buff=0.15)
