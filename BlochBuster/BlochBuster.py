@@ -1413,13 +1413,187 @@ def fadeTextFlashes(config, fadeTime=1.0):
                 config[channel][i] = max(0, config[channel][i-1]-decay)
 
 
-def run(configFile, leapFactor=1):
+def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor):
+    '''Render a 3D Bloch sphere animation using Manim.
+
+    Args:
+        bloch_config:   BlochBuster configuration dictionary.
+        vectors:        numpy array of shape [nx, ny, nz, nComps, nIsochromats, 6, nFrames].
+        B1vector:       complex numpy array of size [nFrames].
+        output:         output specification dictionary from config.
+        outFile:        Path object for the desired output file.
+        leapFactor:     Frame skip factor.
+    '''
+    try:
+        from manim import (
+            ThreeDScene, Arrow3D, Sphere, ThreeDAxes, ValueTracker,
+            DEGREES, linear, Text, MathTex, tempconfig,
+            BLUE_E, GREY, RIGHT, UP, OUT, UL, DL,
+        )
+    except ImportError as e:
+        raise ImportError(
+            'Manim is required for --manim. Install it with: pip install manim'
+        ) from e
+    import shutil
+    import tempfile
+    import glob
+
+    nx, ny, nz, nComps, nIsoc = vectors.shape[:5]
+    nFrames = vectors.shape[6]
+    effective_frames = list(range(0, nFrames, leapFactor))
+    nEffective = len(effective_frames)
+
+    def b2m(v):
+        # Map Bloch (Mx, My, Mz) → Manim (Mx, Mz, My) so that the
+        # longitudinal axis Mz aligns with Manim's UP direction (y-axis).
+        return np.array([float(v[0]), float(v[2]), float(v[1])])
+
+    def rgb_to_hex(rgb):
+        return '#{:02x}{:02x}{:02x}'.format(
+            int(min(max(rgb[0], 0), 1) * 255),
+            int(min(max(rgb[1], 0), 1) * 255),
+            int(min(max(rgb[2], 0), 1) * 255),
+        )
+
+    comp_colors_hex = [rgb_to_hex(c) for c in colors['comps']]
+
+    class BlochScene(ThreeDScene):
+        def construct(self):
+            elev = output.get('elevation') or 30
+            azim = output.get('azimuth', -78)
+            # Convert matplotlib view_init(azim, elev) to Manim camera angles.
+            # phi is measured from Manim's y-axis (UP); theta is azimuthal in xz-plane.
+            phi = (90 - elev) * DEGREES
+            theta = (azim + 180) * DEGREES
+            self.set_camera_orientation(phi=phi, theta=theta)
+
+            ax_limit = 1.0 if (nx * ny * nz == 1 or bloch_config['collapseLocations']) else max(nx, ny, nz) / 2 + 0.5
+            single_loc = nx * ny * nz == 1 or bloch_config['collapseLocations']
+
+            if single_loc:
+                sphere = Sphere(radius=1, resolution=(24, 24))
+                sphere.set_opacity(0.1)
+                sphere.set_color(BLUE_E)
+                self.add(sphere)
+
+            if output.get('drawAxes', True):
+                length = ax_limit * 2
+                axes = ThreeDAxes(
+                    x_range=[-ax_limit, ax_limit, ax_limit],
+                    y_range=[-ax_limit, ax_limit, ax_limit],
+                    z_range=[-ax_limit, ax_limit, ax_limit],
+                    x_length=length,
+                    y_length=length,
+                    z_length=length,
+                    axis_config={'color': GREY, 'stroke_width': 1},
+                    tips=False,
+                )
+                self.add(axes)
+
+                # Axis labels: Manim x→Bloch x, Manim y→Bloch z, Manim z→Bloch y
+                rotate = 'rotate' in output
+                x_lbl = MathTex("x" if rotate else r"x^\prime").scale(0.6)
+                y_lbl = MathTex("z").scale(0.6)
+                z_lbl = MathTex("y" if rotate else r"y^\prime").scale(0.6)
+                x_lbl.next_to(axes.x_axis.get_end(), RIGHT, buff=0.15)
+                y_lbl.next_to(axes.y_axis.get_end(), UP, buff=0.15)
+                z_lbl.next_to(axes.z_axis.get_end(), OUT, buff=0.15)
+                self.add_fixed_orientation_mobjects(x_lbl, y_lbl, z_lbl)
+
+            title = Text(bloch_config['title'], font_size=22)
+            title.to_corner(UL)
+            self.add_fixed_in_frame_mobjects(title)
+
+            t_tracker = ValueTracker(0)
+
+            time_mob = Text('time = 0.0 msec', font_size=18).to_corner(DL)
+            self.add_fixed_in_frame_mobjects(time_mob)
+
+            def update_time(mob):
+                idx = int(np.clip(t_tracker.get_value(), 0, nEffective - 1))
+                frame = effective_frames[idx]
+                t_val = bloch_config['tFrames'][frame % len(bloch_config['tFrames'])]
+                mob.become(Text(f'time = {t_val:.1f} msec', font_size=18).to_corner(DL))
+            time_mob.add_updater(update_time)
+
+            for xi in range(nx):
+                for yi in range(ny):
+                    for zi in range(nz):
+                        for c in range(nComps):
+                            for m in range(nIsoc):
+                                col = comp_colors_hex[c % len(comp_colors_hex)]
+                                alpha = 1.0 - 2 * abs((m + 0.5) / nIsoc - 0.5)
+
+                                M0 = vectors[xi, yi, zi, c, m, :3, 0]
+                                if not bloch_config['collapseLocations']:
+                                    p0 = vectors[xi, yi, zi, c, m, 3:, 0] / bloch_config['locSpacing']
+                                else:
+                                    p0 = np.zeros(3)
+
+                                s0 = b2m(p0)
+                                mv0 = b2m(M0)
+                                if np.linalg.norm(mv0) < 1e-6:
+                                    mv0 = np.array([0.0, 1e-6, 0.0])
+
+                                arrow = Arrow3D(start=s0, end=s0 + mv0, color=col)
+                                arrow.set_opacity(alpha)
+
+                                def make_updater(ix, iy, iz, ic, im, col_h, alph):
+                                    def updater(mob):
+                                        idx = int(np.clip(t_tracker.get_value(), 0, nEffective - 1))
+                                        frame = effective_frames[idx]
+                                        M = vectors[ix, iy, iz, ic, im, :3, frame]
+                                        if not bloch_config['collapseLocations']:
+                                            p = vectors[ix, iy, iz, ic, im, 3:, frame] / bloch_config['locSpacing']
+                                        else:
+                                            p = np.zeros(3)
+                                        s = b2m(p)
+                                        mv = b2m(M)
+                                        if np.linalg.norm(mv) < 1e-6:
+                                            mv = np.array([0.0, 1e-6, 0.0])
+                                        new_a = Arrow3D(start=s, end=s + mv, color=col_h)
+                                        new_a.set_opacity(alph)
+                                        mob.become(new_a)
+                                    return updater
+
+                                arrow.add_updater(make_updater(xi, yi, zi, c, m, col, alpha))
+                                self.add(arrow)
+
+            total_time = nEffective / bloch_config['fps']
+            self.play(
+                t_tracker.animate.set_value(nEffective - 1),
+                run_time=total_time,
+                rate_func=linear,
+            )
+
+    file_ext = outFile.suffix.lower()
+    fmt = 'gif' if file_ext == '.gif' else 'mp4'
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with tempconfig({
+            'quality': 'medium_quality',
+            'media_dir': tmpdir,
+            'output_file': 'bloch_output',
+            'format': fmt,
+            'disable_caching': True,
+        }):
+            scene = BlochScene()
+            scene.render()
+
+        files = glob.glob(str(Path(tmpdir) / '**' / f'*.{fmt}'), recursive=True)
+        if not files:
+            raise RuntimeError(f'Manim did not produce output. Check temp dir: {tmpdir}')
+        shutil.move(files[0], str(outFile))
+
+
+def run(configFile, leapFactor=1, useManim=False):
     ''' Main program. Read and setup config, simulate magnetization vectors and write animated gif.
-        
+
     Args:
         configFile: YAML file specifying configuration.
         leapFactor: Skip frame factor for faster processing and smaller filesize.
-        
+        useManim:   If True, render 3D outputs with Manim instead of Matplotlib.
+
     '''
 
     # Set global constants
@@ -1493,6 +1667,12 @@ def run(configFile, leapFactor=1):
             if output['type']=='3D':
                 if any(comp['composants'] for comp in config['components']):
                     config, vectors = getComposants(config, vectors)
+                if useManim:
+                    outPath.mkdir(exist_ok=True)
+                    outFile = outPath / output['file']
+                    renderWithManim(config, vectors, B1vector, output, outFile, leapFactor)
+                    print('Saved output to "{}"'.format(outFile))
+                    continue
             ffmpegWriter = FFMPEGwriter.FFMPEGwriter(config['fps'])
             outPath.mkdir(exist_ok=True)
             outFile = outPath / output['file']
@@ -1540,12 +1720,15 @@ def parseAndRun():
                         help="Leap factor for smaller filesize and fewer frames per second",
                         type=int,
                         default=1)
+    parser.add_argument('--manim', '-m',
+                        help="Render 3D output with Manim instead of Matplotlib/FFmpeg",
+                        action='store_true')
 
     # Parse command line
     args = parser.parse_args()
 
     # Run main program
-    run(args.configFile, args.leapFactor)
+    run(args.configFile, args.leapFactor, args.manim)
 
 if __name__ == '__main__':
     parseAndRun()

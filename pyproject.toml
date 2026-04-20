@@ -14,6 +14,9 @@ dependencies = [
     "static-ffmpeg>=2.13",
 ]
 
+[project.optional-dependencies]
+manim = ["manim>=0.18.0"]
+
 [project.urls]
 Repository = "https://github.com/bretglun/BlochBuster"
 
