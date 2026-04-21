@@ -1429,6 +1429,7 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
             ThreeDScene, Arrow3D, Sphere, ThreeDAxes, Text,
             tempconfig, DEGREES, BLUE_E, GREY, RIGHT, UP, OUT, UL, DL,
         )
+        from manim import logger as manim_logger
     except ImportError as e:
         raise ImportError(
             'Manim is required for --manim. Install it with: pip install manim'
@@ -1538,7 +1539,11 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
             # Render frame by frame: update geometry then hold for 1/fps seconds.
             # This matches Manim's frame_rate to the animation fps so each wait()
             # produces exactly one output video frame.
-            for frame in effective_frames:
+            n_eff = len(effective_frames)
+            for frame_idx, frame in enumerate(effective_frames):
+                manim_logger.info(
+                    f'Rendering frame {frame_idx + 1}/{n_eff}'
+                )
                 t_val = bloch_config['tFrames'][frame % len(bloch_config['tFrames'])]
                 time_mob.become(
                     Text(f'time = {t_val:.1f} msec', font_size=18).to_corner(DL)
