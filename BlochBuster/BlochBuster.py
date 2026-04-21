@@ -1439,13 +1439,15 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
             'Manim is required for 3D rendering. Install it with: uv add manim'
         ) from e
     import os
+    import sys
     import shutil
     import subprocess
     import tempfile
     import glob
 
-    # OpenGL renderer needs a display. Start Xvfb if none is set.
-    if not os.environ.get('DISPLAY'):
+    # On Linux, OpenGL needs an X display. Start a virtual framebuffer if none exists.
+    # On Windows/macOS, OpenGL context creation is handled natively — no display needed.
+    if sys.platform.startswith('linux') and not os.environ.get('DISPLAY'):
         subprocess.Popen(
             ['Xvfb', ':99', '-screen', '0', '1280x720x24'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
