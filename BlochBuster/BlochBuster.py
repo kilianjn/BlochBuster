@@ -1426,7 +1426,7 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
     '''
     try:
         from manim import (
-            ThreeDScene, Line3D, Dot3D, Sphere, ThreeDAxes, Text,
+            ThreeDScene, Arrow3D, Sphere, ThreeDAxes, Text,
             tempconfig, DEGREES, BLUE_E, GREY, RIGHT, UP, OUT, UL, DL,
         )
     except ImportError as e:
@@ -1442,9 +1442,9 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
     effective_frames = list(range(0, nFrames, leapFactor))
 
     def b2m(v):
-        # Map Bloch (Mx, My, Mz) → Manim (Mx, Mz, My) so that the
-        # longitudinal axis Mz aligns with Manim's UP direction (y-axis).
-        return np.array([float(v[0]), float(v[2]), float(v[1])])
+        # Identity mapping: Bloch (Mx, My, Mz) → Manim (x, y, z).
+        # Manim's camera phi is measured from the z-axis, so z appears vertical.
+        return np.array([float(v[0]), float(v[1]), float(v[2])])
 
     def rgb_to_hex(rgb):
         return '#{:02x}{:02x}{:02x}'.format(
@@ -1459,10 +1459,10 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
         def construct(self):
             elev = output.get('elevation') or 30
             azim = output.get('azimuth', -78)
-            # Convert matplotlib view_init(azim, elev) to Manim camera angles.
-            # phi is measured from Manim's y-axis (UP); theta is azimuthal in xz-plane.
+            # Convert matplotlib view_init(elev, azim) to Manim camera angles.
+            # phi is measured from the z-axis (polar axis = Bloch z = up).
             phi = (90 - elev) * DEGREES
-            theta = (azim + 180) * DEGREES
+            theta = azim * DEGREES
             self.set_camera_orientation(phi=phi, theta=theta)
 
             ax_limit = 1.0 if (nx * ny * nz == 1 or bloch_config['collapseLocations']) else max(nx, ny, nz) / 2 + 0.5
@@ -1488,11 +1488,11 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
                 )
                 self.add(axes)
 
-                # Axis labels: Manim x→Bloch x, Manim y→Bloch z, Manim z→Bloch y
+                # Axis labels match standard BlochBuster: x→x', y→y', z→z
                 rotate = 'rotate' in output
                 x_lbl = Text("x" if rotate else "x'", font_size=20)
-                y_lbl = Text("z", font_size=20)
-                z_lbl = Text("y" if rotate else "y'", font_size=20)
+                y_lbl = Text("y" if rotate else "y'", font_size=20)
+                z_lbl = Text("z", font_size=20)
                 x_lbl.next_to(axes.x_axis.get_end(), RIGHT, buff=0.15)
                 y_lbl.next_to(axes.y_axis.get_end(), UP, buff=0.15)
                 z_lbl.next_to(axes.z_axis.get_end(), OUT, buff=0.15)
@@ -1505,9 +1505,6 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
             time_mob = Text('time = 0.0 msec', font_size=18).to_corner(DL)
             self.add_fixed_in_frame_mobjects(time_mob)
 
-            # Build index list and create one Line3D + tip Dot3D per vector (once).
-            # Using Line3D + put_start_and_end_on is ~19× faster than
-            # recreating Arrow3D objects via become() on every frame.
             indices = [
                 (xi, yi, zi, c, m)
                 for xi in range(nx)
@@ -1518,7 +1515,7 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
             ]
 
             frame0 = effective_frames[0]
-            lines, tips, alphas = [], [], []
+            arrows, alphas = [], []
             for (xi, yi, zi, c, m) in indices:
                 col = comp_colors_hex[c % len(comp_colors_hex)]
                 alpha = 1.0 - 2 * abs((m + 0.5) / nIsoc - 0.5)
@@ -1530,16 +1527,13 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
                 s0 = b2m(p0)
                 mv0 = b2m(M0)
                 if np.linalg.norm(mv0) < 1e-6:
-                    mv0 = np.array([0.0, 1e-6, 0.0])
+                    mv0 = np.array([0.0, 0.0, 1e-6])
 
-                line = Line3D(start=s0, end=s0 + mv0, color=col)
-                line.set_opacity(alpha)
-                tip = Dot3D(point=s0 + mv0, radius=0.04, color=col)
-                tip.set_opacity(alpha)
-                lines.append(line)
-                tips.append(tip)
+                arrow = Arrow3D(start=s0, end=s0 + mv0, color=col, resolution=4)
+                arrow.set_opacity(alpha)
+                arrows.append(arrow)
 
-            self.add(*lines, *tips)
+            self.add(*arrows)
 
             # Render frame by frame: update geometry then hold for 1/fps seconds.
             # This matches Manim's frame_rate to the animation fps so each wait()
@@ -1558,13 +1552,10 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
                     mv = b2m(M)
                     mag = np.linalg.norm(mv)
                     if mag < 1e-6:
-                        lines[j].set_opacity(0)
-                        tips[j].set_opacity(0)
+                        arrows[j].set_opacity(0)
                     else:
-                        lines[j].set_opacity(alphas[j])
-                        tips[j].set_opacity(alphas[j])
-                        lines[j].put_start_and_end_on(s, s + mv)
-                        tips[j].move_to(s + mv)
+                        arrows[j].set_opacity(alphas[j])
+                        arrows[j].put_start_and_end_on(s, s + mv)
 
                 self.wait(1 / bloch_config['fps'])
 
