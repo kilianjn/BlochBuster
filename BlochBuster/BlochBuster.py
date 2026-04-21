@@ -1438,9 +1438,20 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
         raise ImportError(
             'Manim is required for 3D rendering. Install it with: uv add manim'
         ) from e
+    import os
     import shutil
+    import subprocess
     import tempfile
     import glob
+
+    # OpenGL renderer needs a display. Start Xvfb if none is set.
+    if not os.environ.get('DISPLAY'):
+        subprocess.Popen(
+            ['Xvfb', ':99', '-screen', '0', '1280x720x24'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        import time; time.sleep(1.5)
+        os.environ['DISPLAY'] = ':99'
 
     nx, ny, nz, nComps, nIsoc = vectors.shape[:5]
     fps = bloch_config['fps']
@@ -1590,13 +1601,14 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
 
     with tempfile.TemporaryDirectory() as tmpdir:
         with tempconfig({
+            'renderer': 'opengl',
             'pixel_height': 720,
             'pixel_width': 1280,
             'frame_rate': fps,
             'media_dir': tmpdir,
             'output_file': 'bloch_output',
             'format': fmt,
-            'disable_caching': True,
+            'write_to_movie': True,
         }):
             scene = BlochScene()
             scene.render()
