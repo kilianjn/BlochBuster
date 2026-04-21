@@ -1542,7 +1542,7 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
             n_eff = len(effective_frames)
             for frame_idx, frame in enumerate(effective_frames):
                 manim_logger.info(
-                    f'Rendering frame {frame_idx + 1}/{n_eff}'
+                    f'Rendering frame {frame_idx}/{n_eff-1}'
                 )
                 t_val = bloch_config['tFrames'][frame % len(bloch_config['tFrames'])]
                 time_mob.become(
