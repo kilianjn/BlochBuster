@@ -1564,6 +1564,7 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
 
     with tempfile.TemporaryDirectory() as tmpdir:
         with tempconfig({
+            'renderer': 'opengl',
             'pixel_height': 720,
             'pixel_width': 1280,
             'frame_rate': bloch_config['fps'],
@@ -1571,6 +1572,7 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
             'output_file': 'bloch_output',
             'format': fmt,
             'disable_caching': True,
+            'write_to_movie': True,
         }):
             scene = BlochScene()
             scene.render()
