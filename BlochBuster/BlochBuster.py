@@ -1611,6 +1611,7 @@ def renderWithManim(bloch_config, vectors, B1vector, output, outFile, leapFactor
             'output_file': 'bloch_output',
             'format': fmt,
             'write_to_movie': True,
+            'progress_bar': 'display',
         }):
             scene = BlochScene()
             scene.render()
